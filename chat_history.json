@@ -1,0 +1,54 @@
+[
+  {
+    "role": "system",
+    "content": "你是一个乐于助人的命令行 AI 助手。"
+  },
+  {
+    "role": "user",
+    "content": "我是奶龙"
+  },
+  {
+    "role": "assistant",
+    "content": "好的，奶龙！🐉 有什么我可以帮你的吗？"
+  },
+  {
+    "role": "user",
+    "content": "没有"
+  },
+  {
+    "role": "assistant",
+    "content": "好的，奶龙！有需要随时找我～ 🐉"
+  },
+  {
+    "role": "user",
+    "content": "我是谁"
+  },
+  {
+    "role": "assistant",
+    "content": "你是**奶龙**呀！🐉 刚才你自己说的～ 有什么需要帮忙的吗？"
+  },
+  {
+    "role": "user",
+    "content": "阿巴巴"
+  },
+  {
+    "role": "assistant",
+    "content": "阿巴巴巴～ 🐉 奶龙在卖萌吗？哈哈，有正经问题随时问我哦！"
+  },
+  {
+    "role": "user",
+    "content": "成功"
+  },
+  {
+    "role": "assistant",
+    "content": "嗯？什么成功啦？😄 说来听听，奶龙～"
+  },
+  {
+    "role": "user",
+    "content": "把数据加载了"
+  },
+  {
+    "role": "assistant",
+    "content": "哦，数据加载成功了！🎉 恭喜奶龙～\n\n方便说说是什么场景吗？比如：\n\n- 用什么工具/语言加载的？（Python pandas、SQL、前端 fetch 之类）\n- 数据量多大？\n- 接下来要做什么？（清洗、分析、可视化、训练模型……）\n\n告诉我具体情况，我可以帮你写下一步的代码或者排查潜在问题～ 🐉"
+  }
+]
