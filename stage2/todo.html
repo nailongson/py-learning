@@ -1,0 +1,2316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Todo List</title>
+  <script>
+    // 在页面画出来之前先定好主题，避免夜间模式下先闪一下白
+    // 优先用上次手动选的；没选过就跟随系统的深色模式
+    (function () {
+      let theme = null;
+      try { theme = localStorage.getItem("theme"); } catch (e) {}
+      if (!theme) theme = matchMedia("(prefers-color-scheme: dark)").matches ? "night" : "day";
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
+  <style>
+    * { box-sizing: border-box; }
+
+    /* ===== 主题颜色：日间 ===== */
+    /* 所有颜色都用变量，首页和待办页共用同一套，所以两个页面颜色始终一致 */
+    :root {
+      color-scheme: light;
+      --bg: #eef2f7;
+      --bg-glow-1: rgba(147, 197, 253, 0.35);
+      --bg-glow-2: rgba(196, 181, 253, 0.30);
+      --bg-dots: rgba(100, 116, 139, 0.12);
+      --card-bg: rgba(255, 255, 255, 0.8);
+      --card-border: rgba(255, 255, 255, 0.75);
+      --card-shadow: 0 4px 16px rgba(15, 23, 42, 0.08);
+      --text: #1f2937;
+      --text-2: #475569;
+      --muted: #64748b;
+      --faint: #94a3b8;
+      --accent: #2563eb;
+      --accent-hover: #1d4ed8;
+      --accent-soft: rgba(37, 99, 235, 0.22);
+      --on-accent: #fff;
+      --glow: rgba(59, 130, 246, 0.8);
+      --item-bg: #fff;
+      --item-border: #e5e7eb;
+      --item-hover-bg: #f8fbff;
+      --item-hover-border: #bfdbfe;
+      --input-bg: #f9fafb;
+      --input-border: #d1d5db;
+      --breathe-a: #ffffff;
+      --breathe-b: #eaf2ff;
+      --chip-bg: #f1f5f9;
+      --chip-border: #e2e8f0;
+      --chip-hover: #e0ecff;
+      --clock-text: #1e3a8a;
+      --danger-bg: #fee2e2;
+      --danger-hover: #fecaca;
+      --danger-text: #b91c1c;
+      --done: #16a34a;
+    }
+    /* ===== 主题颜色：夜间（暖深色，延续首页卡片原来的深棕色调） ===== */
+    :root[data-theme="night"] {
+      color-scheme: dark;
+      --bg: #15161a;
+      --bg-glow-1: rgba(59, 130, 246, 0.16);
+      --bg-glow-2: rgba(168, 85, 247, 0.14);
+      --bg-dots: rgba(148, 163, 184, 0.08);
+      --card-bg: rgba(52, 46, 40, 0.78);
+      --card-border: rgba(255, 255, 255, 0.14);
+      --card-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+      --text: #f5f5f4;
+      --text-2: rgba(255, 255, 255, 0.85);
+      --muted: #a8a29e;
+      --faint: #8a837e;
+      --accent: #60a5fa;
+      --accent-hover: #93c5fd;
+      --accent-soft: rgba(96, 165, 250, 0.25);
+      --on-accent: #0b1220;
+      --glow: rgba(147, 197, 253, 0.85);
+      --item-bg: rgba(255, 255, 255, 0.05);
+      --item-border: rgba(255, 255, 255, 0.1);
+      --item-hover-bg: rgba(255, 255, 255, 0.09);
+      --item-hover-border: rgba(147, 197, 253, 0.45);
+      --input-bg: rgba(255, 255, 255, 0.06);
+      --input-border: rgba(255, 255, 255, 0.16);
+      --breathe-a: rgba(255, 255, 255, 0.06);
+      --breathe-b: rgba(96, 165, 250, 0.14);
+      --chip-bg: rgba(255, 255, 255, 0.06);
+      --chip-border: rgba(255, 255, 255, 0.12);
+      --chip-hover: rgba(96, 165, 250, 0.18);
+      --clock-text: #bfdbfe;
+      --danger-bg: rgba(248, 113, 113, 0.15);
+      --danger-hover: rgba(248, 113, 113, 0.25);
+      --danger-text: #fca5a5;
+      --done: #4ade80;
+    }
+
+    body {
+      margin: 0;
+      min-height: 100vh;
+      padding: 40px 16px 96px;
+      font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      color: var(--text);
+      /* 简约背景：底色 + 两团很淡的彩色光斑 + 细点阵 */
+      background-color: var(--bg);
+      background-image:
+        radial-gradient(circle at 15% 20%, var(--bg-glow-1), transparent 40%),
+        radial-gradient(circle at 85% 80%, var(--bg-glow-2), transparent 40%),
+        radial-gradient(var(--bg-dots) 1px, transparent 1px);
+      background-size: 100% 100%, 100% 100%, 22px 22px;
+      background-attachment: fixed;   /* 滚动时背景不动 */
+      transition: background-color 0.4s, color 0.4s;
+    }
+
+    /* 页面切换：带 hidden 属性的页面不显示；页面出现时淡入 */
+    [hidden] { display: none !important; }
+    .view { animation: view-in 0.3s ease-out; }
+    @keyframes view-in {
+      from { opacity: 0; transform: translateY(8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ===== 卡片通用：半透明毛玻璃；悬停时边框亮起（不再上浮） ===== */
+    .glass {
+      background: var(--card-bg);
+      -webkit-backdrop-filter: blur(16px) saturate(140%);
+      backdrop-filter: blur(16px) saturate(140%);
+      border: 1px solid var(--card-border);
+      box-shadow: var(--card-shadow);
+      transition: border-color 0.3s, box-shadow 0.3s, background-color 0.4s;
+    }
+    .glass:hover,
+    .glass:focus-within {
+      border-color: var(--glow);
+      /* 第一层：贴着边框的一圈亮线；第二层：向外晕开的柔光；最后保留原阴影 */
+      box-shadow: 0 0 0 1px var(--glow), 0 0 20px var(--accent-soft), var(--card-shadow);
+    }
+
+    /* ===== 首页：状态卡片 ===== */
+    .status-row {
+      max-width: 480px;
+      margin: 0 auto;
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+    }
+    .status-card {
+      flex: 1;
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      gap: 0;
+      padding: 16px 20px;
+      border-radius: 24px;
+    }
+    .status-top {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .status-info { flex: 1; min-width: 0; }
+    .status-name {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin: 0 0 6px;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: 0.02em;
+    }
+    /* 在线状态小绿点，一圈圈向外扩散 */
+    .online-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #86efac;
+      animation: dot-pulse 2s ease-out infinite;
+    }
+    @keyframes dot-pulse {
+      0%   { box-shadow: 0 0 0 0 rgba(134, 239, 172, 0.6); }
+      70%  { box-shadow: 0 0 0 6px rgba(134, 239, 172, 0); }
+      100% { box-shadow: 0 0 0 0 rgba(134, 239, 172, 0); }
+    }
+    /* 名字输入框：没有框，看起来就是普通文字，点一下就能改
+       选择器前面加 .status-name，优先级才能盖过后面通用的 input[type="text"] 样式 */
+    .status-name .name-input {
+      flex: none;
+      field-sizing: content;   /* 宽度跟着文字长度走（不支持的浏览器用 JS 设置的 size） */
+      min-width: 2em;
+      max-width: 12em;
+      margin: 0;
+      padding: 0 0 1px;
+      font: inherit;
+      letter-spacing: inherit;
+      color: inherit;
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid transparent;
+      border-radius: 0;
+      box-shadow: none;
+      outline: none;
+      cursor: text;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .status-name .name-input:hover { color: var(--accent); border-bottom-color: transparent; }
+    /* 正在编辑时：文字变主题色，底下一条细线，方便看出光标在这里 */
+    .status-name .name-input:focus {
+      color: var(--accent);
+      background: transparent;
+      border-bottom-color: var(--accent);
+      box-shadow: none;
+      animation: none;
+    }
+    .status-state { font-weight: 600; }
+    .status-line {
+      margin: 4px 0 0;
+      font-size: 15px;
+      color: var(--text-2);
+      font-variant-numeric: tabular-nums;
+    }
+    .status-line.doing { font-size: 13px; color: var(--muted); }
+
+    /* 天气文字：看起来是普通文字，悬停出现下划线，提示可以点击换地区 */
+    .weather-btn {
+      padding: 0 2px;
+      font: inherit;
+      color: inherit;
+      background: transparent;
+      border-radius: 4px;
+      text-decoration: underline dashed transparent;
+      text-underline-offset: 4px;
+      transition: text-decoration-color 0.2s, color 0.2s;
+    }
+    .weather-btn:hover,
+    .weather-btn[aria-expanded="true"] { text-decoration-color: currentColor; color: var(--text); }
+    .weather-btn:active { transform: none; }
+
+    /* 地区选择面板 */
+    .region-panel {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: flex-end;
+      gap: 8px;
+      margin-top: 10px;
+      padding: 10px;
+      border: 1px solid var(--chip-border);
+      border-radius: 12px;
+      background: var(--chip-bg);
+      animation: item-in 0.2s ease-out;
+    }
+    .region-panel label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--muted); }
+    .region-panel select {
+      min-width: 7em;
+      padding: 6px 8px;
+      font-size: 14px;
+      color: var(--text);
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      border-radius: 8px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .region-panel select:hover { border-color: var(--item-hover-border); }
+    .region-panel select:focus-visible {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-soft);
+    }
+
+    /* 图标按钮（日历 / 设置 / 主题），44px 方便点击 */
+    .icon-btn {
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 44px;
+      height: 44px;
+      padding: 0;
+      border: none;
+      border-radius: 12px;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      text-decoration: none;
+      transition: transform 0.2s, background-color 0.2s, color 0.2s;
+    }
+    .icon-btn:hover { background: var(--chip-hover); }
+    .calendar-btn:hover { transform: scale(1.08); }
+    .calendar-btn:active { transform: scale(0.95); }
+    .settings-btn { margin-top: 12px; color: var(--text-2); }
+    .settings-btn:hover { transform: rotate(45deg); }
+
+    /* 右下角的日间/夜间切换按钮，两个页面都能看到 */
+    .theme-toggle {
+      position: fixed;
+      right: 20px;
+      bottom: 20px;
+      z-index: 10;
+      border-radius: 50%;
+      width: 48px;
+      height: 48px;
+    }
+    .theme-toggle:hover { transform: rotate(20deg); }
+    :root[data-theme="night"] .icon-sun,
+    :root:not([data-theme="night"]) .icon-moon { display: none; }
+
+    .icon-btn:focus-visible, .back-link:focus-visible,
+    input[type="checkbox"]:focus-visible, button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    /* ===== 待办页 ===== */
+    .container {
+      max-width: 480px;
+      margin: 0 auto;
+      padding: 24px;
+      border-radius: 24px;
+    }
+    .back-link {
+      display: inline-block;
+      margin-bottom: 12px;
+      padding: 4px 8px 4px 0;
+      font-size: 14px;
+      color: var(--accent);
+      text-decoration: none;
+      border-radius: 6px;
+      transition: transform 0.2s, color 0.2s;
+    }
+    .back-link:hover { color: var(--accent-hover); transform: translateX(-3px); }
+
+    /* 标题 + 时钟 */
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    h1 { margin: 0; font-size: 24px; }
+    h2 { margin: 0; font-size: 16px; }
+    .clock {
+      padding: 6px 12px;
+      text-align: right;
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 10px;
+      transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+    }
+    .clock:hover { background: var(--chip-hover); border-color: var(--glow); box-shadow: 0 0 12px var(--accent-soft); }
+    #clock-time {
+      display: block;
+      font-size: 20px;
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;   /* 数字等宽，秒数跳动时不会左右抖 */
+      color: var(--clock-text);
+    }
+    #clock-date { font-size: 12px; color: var(--muted); }
+
+    /* 输入框 */
+    form { display: flex; gap: 8px; }
+    input[type="text"] {
+      flex: 1;
+      min-width: 0;
+      padding: 10px 12px;
+      font-size: 16px;
+      color: var(--text);
+      border: 1px solid var(--input-border);
+      border-radius: 8px;
+      background: var(--input-bg);
+      outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+    }
+    input[type="text"]:hover { border-color: var(--item-hover-border); }
+    /* 光标在输入框里时：边框亮起 + 外发光 + 内部底色缓慢“呼吸” */
+    input[type="text"]:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-soft);
+      animation: input-breathe 2.4s ease-in-out infinite;
+    }
+    @keyframes input-breathe {
+      0%, 100% { background-color: var(--breathe-a); }
+      50%      { background-color: var(--breathe-b); }
+    }
+    input[type="text"]::placeholder { color: var(--faint); transition: color 0.2s; }
+    input[type="text"]:focus::placeholder { color: var(--muted); }
+
+    /* 按钮：悬停时发光，按下时缩一下 */
+    button {
+      padding: 10px 16px;
+      font-size: 14px;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.2s, background-color 0.2s;
+    }
+    button:active { transform: scale(0.97); }
+    .add-btn { background: var(--accent); color: var(--on-accent); }
+    .add-btn:hover { background: var(--accent-hover); box-shadow: 0 0 14px var(--accent-soft); }
+    .small-btn { padding: 6px 12px; font-size: 13px; }
+    .delete-btn { background: var(--danger-bg); color: var(--danger-text); }
+    .delete-btn:hover { background: var(--danger-hover); }
+    .ghost-btn { background: var(--chip-bg); color: var(--text-2); border: 1px solid var(--chip-border); }
+    .ghost-btn:hover { border-color: var(--glow); }
+
+    #message { min-height: 20px; margin: 8px 0; font-size: 14px; color: var(--muted); }
+
+    /* 任务列表：每一行是一个小卡片，悬停时边框亮起 */
+    ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 8px; }
+    li {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--item-bg);
+      border: 1px solid var(--item-border);
+      border-radius: 10px;
+      transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+      animation: item-in 0.25s ease-out;   /* 新条目出现时淡入 */
+    }
+    li:not(.empty):hover {
+      border-color: var(--item-hover-border);
+      background: var(--item-hover-bg);
+      box-shadow: 0 0 12px var(--accent-soft);
+    }
+    @keyframes item-in {
+      from { opacity: 0; transform: translateY(-6px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    li label { flex: 1; display: flex; align-items: center; gap: 10px; cursor: pointer; min-width: 0; }
+    li input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      flex-shrink: 0;
+      cursor: pointer;
+      accent-color: var(--accent);
+      transition: transform 0.15s;
+    }
+    li input[type="checkbox"]:hover { transform: scale(1.2); }
+    .task-body { display: flex; flex-direction: column; min-width: 0; }
+    .task-text { word-break: break-all; transition: color 0.2s; }
+    li.completed .task-text { text-decoration: line-through; color: var(--muted); }
+    .task-time { font-size: 12px; color: var(--faint); margin-top: 2px; }
+    .status { font-size: 12px; color: var(--muted); margin-left: auto; white-space: nowrap; }
+    li.completed .status { color: var(--done); }
+    .empty { color: var(--muted); justify-content: center; border-style: dashed; background: transparent; }
+
+    /* ===== 日历页 ===== */
+    .cal-top {
+      display: grid;
+      grid-template-columns: 44px 1fr 44px;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+    .cal-top h1 { text-align: center; }
+    /* 年份切换：胶囊形分段按钮 */
+    .seg {
+      display: flex;
+      gap: 4px;
+      padding: 4px;
+      margin-bottom: 16px;
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 999px;
+    }
+    .seg-btn {
+      flex: 1;
+      padding: 8px 0;
+      font-size: 16px;
+      color: var(--muted);
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 999px;
+      transition: color 0.2s, background-color 0.2s, border-color 0.2s, box-shadow 0.2s;
+    }
+    .seg-btn:hover { color: var(--text); border-color: var(--glow); }
+    .seg-btn[aria-pressed="true"] {
+      color: var(--text);
+      font-weight: 600;
+      background: var(--item-bg);
+      box-shadow: 0 2px 8px rgba(15, 23, 42, 0.12);
+    }
+    :root[data-theme="night"] .seg-btn[aria-pressed="true"] { background: rgba(255, 255, 255, 0.14); }
+
+    .month-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+    .month-nav h2 { font-size: 18px; font-variant-numeric: tabular-nums; }
+    .cal-weekdays, .cal-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 4px;
+      text-align: center;
+    }
+    .cal-weekdays { margin-bottom: 4px; font-size: 13px; color: var(--muted); }
+    .cal-weekdays span { padding: 6px 0; }
+    /* 每一天：悬停时边框亮起；今天数字是主题色；选中的那天有边框和底色 */
+    .cal-day {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 4px;
+      height: 54px;
+      padding: 0;
+      font-size: 17px;
+      color: var(--text);
+      background: transparent;
+      border: 1.5px solid transparent;
+      border-radius: 14px;
+      font-variant-numeric: tabular-nums;
+      transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+    }
+    .cal-day:hover { border-color: var(--glow); box-shadow: 0 0 10px var(--accent-soft); }
+    .cal-day.is-today .cal-num { color: var(--accent); font-weight: 700; }
+    .cal-day[aria-pressed="true"] { background: var(--chip-bg); border-color: var(--text-2); font-weight: 700; }
+    .cal-mark { display: flex; align-items: center; justify-content: center; height: 6px; }
+    .cal-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    .cal-legend { display: flex; align-items: center; gap: 6px; margin: 12px 0 20px; font-size: 13px; color: var(--muted); }
+
+    /* 选中那天的日程卡片 */
+    .day-head { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px; }
+    .day-head h2 { font-size: 20px; }
+    .chip {
+      padding: 3px 10px;
+      font-size: 12px;
+      color: var(--text-2);
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 999px;
+      white-space: nowrap;
+    }
+    .sched-list li {
+      padding: 12px 14px;
+      border-left: 4px solid var(--accent);
+      border-radius: 14px;
+    }
+    .sched-list li.is-done,
+    .sched-list li.is-past { opacity: 0.65; border-left-color: var(--item-hover-border); }
+    .sched-body { flex: 1; min-width: 0; }
+    .sched-title { font-size: 16px; word-break: break-all; }
+    li.is-done .sched-title { text-decoration: line-through; }
+    .sched-meta { margin-top: 2px; font-size: 13px; color: var(--muted); }
+    .sched-list .chip { color: var(--accent); }
+    .pill-btn {
+      display: inline-block;
+      margin-top: 12px;
+      padding: 8px 16px;
+      font-size: 15px;
+      color: var(--text);
+      text-decoration: none;
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 999px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .pill-btn:hover { border-color: var(--glow); box-shadow: 0 0 12px var(--accent-soft); }
+    .pill-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    /* ===== 作息：看电脑 / 休息 时间段 ===== */
+    .routine { margin-top: 24px; }
+    .activity-head h3 { margin: 0; font-size: 15px; font-weight: 500; color: var(--muted); }
+    .routine-list { gap: 2px; }
+    .routine-list li {
+      gap: 12px;
+      padding: 6px 8px;
+      font-size: 15px;
+      background: transparent;
+      border-color: transparent;
+    }
+    .routine-time { color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .routine-label { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+    .routine-label::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+    .routine-list li.is-pc .routine-label::before { background: var(--accent); }
+    .routine-list li.is-rest { color: var(--muted); }
+    .routine-app { min-width: 0; font-size: 12px; color: var(--faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* “看电脑”这一行可以点开，看这段时间里具体在用什么 */
+    .routine-list li.is-pc { display: block; padding: 0; }
+    .routine-list li.is-pc:hover { border-color: transparent; background: transparent; box-shadow: none; }
+    .routine-row {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 6px 8px;
+      font: inherit;
+      color: inherit;
+      text-align: left;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: 10px;
+      transition: border-color 0.2s, background-color 0.2s, box-shadow 0.2s;
+    }
+    .routine-row:hover,
+    .routine-row[aria-expanded="true"] {
+      border-color: var(--item-hover-border);
+      background: var(--item-hover-bg);
+      box-shadow: 0 0 12px var(--accent-soft);
+    }
+    .routine-row:active { transform: none; }
+    .routine-chevron { flex-shrink: 0; color: var(--faint); transition: transform 0.2s; }
+    .routine-row[aria-expanded="true"] .routine-chevron { transform: rotate(90deg); }
+    /* 展开后的明细：左边一条竖线，缩进显示 */
+    .routine-detail {
+      margin: 4px 0 6px 20px;
+      padding-left: 12px;
+      border-left: 2px solid var(--item-border);
+      gap: 0;
+    }
+    .routine-list .routine-detail li { gap: 10px; padding: 4px 8px; font-size: 13px; }
+    .routine-detail .routine-app { flex: 1; font-size: 13px; color: var(--text-2); }
+    .routine-detail .routine-time { font-size: 12px; color: var(--muted); }
+
+    .activity-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 8px;
+    }
+    .activity-head .actions { display: flex; gap: 6px; }
+    #activity-state { margin: 0 0 10px; font-size: 13px; color: var(--muted); }
+    .activity-dur {
+      margin-left: auto;
+      font-size: 12px;
+      color: var(--accent);
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 999px;
+      padding: 2px 8px;
+      white-space: nowrap;
+      font-variant-numeric: tabular-nums;
+    }
+    .activity-help { font-size: 13px; color: var(--muted); line-height: 1.6; }
+    .activity-help code {
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: var(--chip-bg);
+      font-family: ui-monospace, Menlo, monospace;
+    }
+
+    /* ===== 首页：近期安排（合并进状态卡片） ===== */
+    .projects-section {
+      margin-top: 14px;
+      padding-top: 14px;
+      border-top: 1px solid var(--item-border);
+    }
+    .projects-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 12px;
+    }
+    .projects-head h3 { margin: 0; font-size: 15px; font-weight: 600; color: var(--text); }
+    .projects-add-link {
+      font-size: 13px;
+      color: var(--accent);
+      text-decoration: none;
+      padding: 4px 8px;
+      border-radius: 8px;
+      transition: background-color 0.2s;
+    }
+    .projects-add-link:hover { background: var(--chip-hover); }
+    .projects-list { gap: 6px; }
+    .proj-hint-wrapper {
+      list-style: none;
+      display: flex !important;
+      flex-direction: column;
+      gap: 4px;
+      padding: 0 !important;
+      background: transparent !important;
+      border: none !important;
+      border-radius: 0 !important;
+      box-shadow: none !important;
+      animation: none !important;
+    }
+    .project-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 12px;
+      background: var(--item-bg);
+      border: 1px solid var(--item-border);
+      border-radius: 10px;
+      transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s;
+      animation: item-in 0.25s ease-out;
+    }
+    .project-row:hover {
+      border-color: var(--item-hover-border);
+      background: var(--item-hover-bg);
+      box-shadow: 0 0 12px var(--accent-soft);
+    }
+    .project-dot {
+      width: 8px; height: 8px; flex-shrink: 0;
+      border-radius: 50%;
+      background: var(--accent);
+    }
+    .project-dot.is-done { background: var(--done); }
+    .project-name-link {
+      flex: 1;
+      min-width: 0;
+      font-size: 15px;
+      color: var(--text);
+      text-decoration: none;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .project-name-link:hover { color: var(--accent); }
+    .project-progress {
+      font-size: 12px;
+      color: var(--muted);
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+    .project-hide-btn {
+      flex-shrink: 0;
+      padding: 3px 8px;
+      font-size: 12px;
+      color: var(--muted);
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 6px;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .project-hide-btn:hover { color: var(--danger-text); border-color: var(--danger-text); }
+
+    /* ===== 近期安排页 ===== */
+    .proj-new-btn {
+      display: block;
+      width: 100%;
+      margin-bottom: 16px;
+      padding: 10px;
+      font-size: 15px;
+      color: var(--accent);
+      background: var(--chip-bg);
+      border: 1px dashed var(--chip-border);
+      border-radius: 12px;
+      transition: border-color 0.2s, background-color 0.2s;
+    }
+    .proj-new-btn:hover { border-color: var(--accent); background: var(--chip-hover); }
+    .proj-item {
+      margin-bottom: 10px;
+      border: 1px solid var(--item-border);
+      border-radius: 16px;
+      overflow: hidden;
+      background: var(--item-bg);
+      transition: border-color 0.2s, box-shadow 0.2s;
+      animation: item-in 0.25s ease-out;
+    }
+    .proj-item:hover { border-color: var(--item-hover-border); box-shadow: 0 0 14px var(--accent-soft); }
+    .proj-summary {
+      width: 100%;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 12px 14px;
+      font: inherit;
+      color: inherit;
+      text-align: left;
+      background: transparent;
+      border: none;
+      border-radius: 0;
+      transition: background-color 0.2s;
+    }
+    .proj-summary:hover { background: var(--item-hover-bg); }
+    .proj-chevron { flex-shrink: 0; color: var(--faint); transition: transform 0.2s; font-size: 16px; }
+    .proj-item.is-open .proj-chevron { transform: rotate(90deg); }
+    .proj-title-text { flex: 1; font-size: 16px; font-weight: 500; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .proj-chip {
+      flex-shrink: 0;
+      padding: 2px 8px;
+      font-size: 12px;
+      border-radius: 999px;
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      color: var(--muted);
+    }
+    .proj-chip.is-done { color: var(--done); border-color: var(--done); background: transparent; }
+    .proj-detail {
+      padding: 0 14px 14px;
+      border-top: 1px solid var(--item-border);
+    }
+    .proj-detail[hidden] { display: none; }
+    .proj-name-input {
+      display: block;
+      width: 100%;
+      margin: 12px 0 8px;
+      padding: 6px 8px;
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--text);
+      background: transparent;
+      border: none;
+      border-bottom: 1px solid var(--item-border);
+      border-radius: 0;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .proj-name-input:focus { border-bottom-color: var(--accent); }
+    .proj-note-toggle {
+      font-size: 13px;
+      color: var(--muted);
+      padding: 2px 6px;
+      border-radius: 6px;
+      background: transparent;
+      border: none;
+      cursor: pointer;
+      transition: color 0.2s;
+    }
+    .proj-note-toggle:hover { color: var(--accent); }
+    .proj-note {
+      display: block;
+      width: 100%;
+      margin: 6px 0;
+      padding: 8px;
+      font-size: 14px;
+      color: var(--text-2);
+      background: var(--input-bg);
+      border: 1px solid var(--input-border);
+      border-radius: 8px;
+      resize: vertical;
+      min-height: 80px;
+      outline: none;
+      line-height: 1.6;
+      transition: border-color 0.2s;
+    }
+    .proj-note:focus { border-color: var(--accent); }
+    .proj-note[hidden] { display: none; }
+    /* 首页条目内联预览 */
+    .proj-inline-preview {
+      margin: 0 0 4px 18px;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: var(--text-2);
+      background: var(--input-bg);
+      border: 1px solid var(--item-border);
+      border-radius: 10px;
+      white-space: pre-wrap;
+      word-break: break-all;
+      line-height: 1.6;
+      animation: item-in 0.2s ease-out;
+    }
+    .proj-inline-preview[hidden] { display: none; }
+    .proj-inline-textarea {
+      display: block;
+      width: 100%;
+      padding: 8px 12px;
+      font-size: 13px;
+      color: var(--text);
+      background: var(--input-bg);
+      border: 1px solid var(--accent);
+      border-radius: 10px;
+      resize: vertical;
+      min-height: 80px;
+      outline: none;
+      line-height: 1.6;
+      box-shadow: 0 0 0 3px var(--accent-soft);
+      animation: item-in 0.2s ease-out;
+    }
+    .proj-inline-edit-row {
+      display: flex;
+      gap: 6px;
+      margin: 4px 0 4px 18px;
+      animation: item-in 0.2s ease-out;
+    }
+    .proj-inline-edit-row[hidden] { display: none; }
+    .proj-inline-save {
+      padding: 4px 12px;
+      font-size: 13px;
+      color: var(--on-accent);
+      background: var(--accent);
+      border: none;
+      border-radius: 6px;
+      transition: background-color 0.2s;
+    }
+    .proj-inline-save:hover { background: var(--accent-hover); }
+    .proj-inline-cancel {
+      padding: 4px 10px;
+      font-size: 13px;
+      color: var(--muted);
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 6px;
+      transition: border-color 0.2s;
+    }
+    .proj-inline-cancel:hover { border-color: var(--glow); }
+    /* 项目底部操作按钮 */
+    .proj-actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 12px;
+      flex-wrap: wrap;
+    }
+    .proj-hide-btn2 {
+      padding: 6px 12px;
+      font-size: 13px;
+      color: var(--muted);
+      background: var(--chip-bg);
+      border: 1px solid var(--chip-border);
+      border-radius: 8px;
+      transition: color 0.2s, border-color 0.2s;
+    }
+    .proj-hide-btn2:hover { color: var(--text); border-color: var(--glow); }
+    .proj-del-btn {
+      padding: 6px 12px;
+      font-size: 13px;
+      color: var(--danger-text);
+      background: var(--danger-bg);
+      border: none;
+      border-radius: 8px;
+      transition: background-color 0.2s;
+    }
+    .proj-del-btn:hover { background: var(--danger-hover); }
+    .proj-mark-done-btn {
+      padding: 6px 12px;
+      font-size: 13px;
+      color: var(--done);
+      background: transparent;
+      border: 1px solid var(--done);
+      border-radius: 8px;
+      transition: background-color 0.2s;
+    }
+    .proj-mark-done-btn:hover { background: var(--chip-bg); }
+    /* 已隐藏区 */
+    .hidden-section { margin-top: 20px; }
+    .hidden-section h3 { font-size: 13px; color: var(--muted); font-weight: 500; margin-bottom: 8px; }
+    .restore-btn {
+      flex-shrink: 0;
+      padding: 3px 10px;
+      font-size: 12px;
+      color: var(--accent);
+      background: transparent;
+      border: 1px solid var(--accent);
+      border-radius: 6px;
+      transition: background-color 0.2s;
+    }
+    .restore-btn:hover { background: var(--chip-hover); }
+
+    /* 系统设置了”减少动态效果”时，关掉动画，照顾对动画敏感的用户 */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation: none !important;
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <!-- ===== 首页：状态卡片 ===== -->
+    <section id="home-view" class="view" aria-label="首页">
+      <div class="status-row">
+        <article class="status-card glass">
+          <div class="status-top">
+          <div class="status-info">
+            <!-- 第 1 行：在线状态 + 名字 · 当前状态 -->
+            <p class="status-name">
+              <span class="online-dot" aria-hidden="true"></span>
+              <!-- 名字可以直接点击修改，按回车保存，Esc 取消 -->
+              <input type="text" id="name-input" class="name-input" maxlength="20"
+                     aria-label="你的名字（点击修改）" title="点击修改名字" autocomplete="off" spellcheck="false">
+              <span class="status-state" id="profile-state"></span>
+            </p>
+            <!-- 第 2 行：日期 星期 · 时间 · 地区 · 天气（点天气可以换地区） -->
+            <p class="status-line">
+              <span id="me-line"></span><button type="button" class="weather-btn" id="weather-btn"
+                aria-expanded="false" aria-controls="region-panel" title="点击选择地区"><span id="weather-text"></span></button>
+            </p>
+            <!-- 地区选择面板，默认收起 -->
+            <div class="region-panel" id="region-panel" hidden>
+              <label>国家
+                <select id="country-select"></select>
+              </label>
+              <label>省 / 州
+                <select id="province-select"></select>
+              </label>
+              <button type="button" class="small-btn ghost-btn" id="region-done">完成</button>
+            </div>
+            <!-- 第 3 行：你电脑上正在做的事（开启记录后才显示） -->
+            <p class="status-line doing" id="doing-line" hidden></p>
+          </div>
+          <!-- 右侧：日历图标，点击进入日历页 -->
+          <a href="#calendar" class="icon-btn calendar-btn" aria-label="打开日历">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <rect x="3" y="4" width="18" height="18" rx="3"/>
+              <path d="M16 2v4M8 2v4M3 10h18"/>
+              <rect x="7" y="14" width="3.5" height="3.5" rx="0.8" fill="currentColor" stroke="none"/>
+            </svg>
+          </a>
+          </div><!-- /.status-top -->
+          <!-- 近期安排 -->
+          <div class="projects-section">
+            <div class="projects-head">
+              <h3>近期安排</h3>
+              <a href="#projects" class="projects-add-link">添加安排 →</a>
+            </div>
+            <ul class="projects-list" id="projects-hint-list"></ul>
+          </div>
+        </article>
+
+        <!-- 卡片外右上角：设置图标（暂时只是占位，没有功能） -->
+        <button type="button" class="icon-btn settings-btn" aria-label="设置（暂未开放）" aria-disabled="true">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
+      </div>
+    </section>
+
+    <!-- ===== 日历页 ===== -->
+    <section id="calendar-view" class="view container glass" aria-labelledby="cal-title" hidden>
+      <div class="cal-top">
+        <a href="#" class="icon-btn" aria-label="返回首页">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+        </a>
+        <h1 id="cal-title">日历</h1>
+        <span aria-hidden="true"></span>
+      </div>
+
+      <!-- 年份切换 -->
+      <div class="seg" id="year-tabs" role="group" aria-label="选择年份"></div>
+
+      <!-- 月份切换 -->
+      <div class="month-nav">
+        <button type="button" class="icon-btn" id="prev-month" aria-label="上个月">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <h2 id="month-title" aria-live="polite"></h2>
+        <button type="button" class="icon-btn" id="next-month" aria-label="下个月">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+
+      <!-- 月历 -->
+      <div class="cal-weekdays" aria-hidden="true">
+        <span>周日</span><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span>
+      </div>
+      <div class="cal-grid" id="cal-grid"></div>
+      <p class="cal-legend"><span class="cal-dot" aria-hidden="true"></span>有日程</p>
+
+      <!-- 选中那天：日程 -->
+      <div class="day-head">
+        <h2 id="day-title"></h2>
+        <span class="chip" id="today-chip" hidden>今天</span>
+      </div>
+      <ul class="sched-list" id="sched-list"></ul>
+      <a href="#todo" class="pill-btn">添加日程</a>
+
+      <!-- 选中那天：作息（数据来自本机运行的 activity_tracker.py） -->
+      <section class="routine" aria-labelledby="routine-title">
+        <div class="activity-head">
+          <h3 id="routine-title">今日作息</h3>
+          <div class="actions">
+            <button type="button" class="small-btn ghost-btn" id="activity-refresh">刷新</button>
+            <button type="button" class="small-btn delete-btn" id="activity-clear">清空今天</button>
+          </div>
+        </div>
+        <p id="activity-state" role="status" aria-live="polite"></p>
+        <ul class="routine-list" id="activity-list"></ul>
+      </section>
+    </section>
+
+    <!-- ===== 待办页（从日历页的“添加日程”进入，添加到日历上选中的那天） ===== -->
+    <section id="todo-view" class="view container glass" aria-labelledby="todo-title" hidden>
+      <a href="#calendar" class="back-link">← 返回日历</a>
+      <div class="header">
+        <h1 id="todo-title">今日待办事件</h1>
+        <!-- 时钟：每秒刷新 -->
+        <div class="clock">
+          <time id="clock-time"></time>
+          <span id="clock-date"></span>
+        </div>
+      </div>
+
+      <!-- 增加 -->
+      <form id="add-form">
+        <input type="text" id="task-input" placeholder="请输入要添加的待办事件" aria-label="待办事件" autocomplete="off">
+        <button type="submit" class="add-btn">添加</button>
+      </form>
+
+      <!-- 操作提示，aria-live 让读屏软件也能读到 -->
+      <p id="message" role="status" aria-live="polite"></p>
+
+      <!-- 列出 -->
+      <ul id="todo-list"></ul>
+    </section>
+    <!-- ===== 近期安排页 ===== -->
+    <section id="projects-view" class="view container glass" aria-labelledby="projects-title" hidden>
+      <div class="cal-top">
+        <a href="#" class="icon-btn" aria-label="返回首页">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 18l-6-6 6-6"/></svg>
+        </a>
+        <h1 id="projects-title">近期安排</h1>
+        <span aria-hidden="true"></span>
+      </div>
+
+      <button type="button" class="proj-new-btn" id="proj-new-btn">＋ 新建安排</button>
+
+      <div id="proj-list"></div>
+
+      <div class="hidden-section" id="hidden-section" hidden>
+        <h3>已隐藏</h3>
+        <ul class="projects-list" id="hidden-list"></ul>
+      </div>
+    </section>
+
+  </main>
+
+  <!-- 日间 / 夜间切换 -->
+  <button type="button" class="icon-btn theme-toggle glass" id="theme-toggle" aria-label="切换日间/夜间模式">
+    <svg class="icon-sun" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="4"/>
+      <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/>
+    </svg>
+    <svg class="icon-moon" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+    </svg>
+  </button>
+
+  <script>
+    // 和 Python 版一样：每个任务是一个对象，存在数组里
+    // 状态用布尔值存，显示时再转成文字（参考 practice_1 的做法）
+    // date 是任务属于哪一天（"2026-09-29"），日历靠它标小圆点
+    // createdAt / completedAt 记录添加时间和完成时间（毫秒时间戳，方便存进 localStorage）
+    // 任务存在 localStorage 里，刷新页面不会丢
+    function loadTodos() {
+      try {
+        const list = JSON.parse(localStorage.getItem("todos"));
+        if (Array.isArray(list)) return list;
+      } catch (e) {}
+      return [];
+    }
+    function saveTodos() {
+      try { localStorage.setItem("todos", JSON.stringify(todoList)); } catch (e) {}
+    }
+    const todoList = loadTodos();
+    let nextId = todoList.reduce((max, t) => Math.max(max, t.id || 0), 0) + 1;
+
+    const form = document.getElementById("add-form");
+    const input = document.getElementById("task-input");
+    const listEl = document.getElementById("todo-list");
+    const messageEl = document.getElementById("message");
+    const clockTimeEl = document.getElementById("clock-time");
+    const clockDateEl = document.getElementById("clock-date");
+
+    const WEEKDAYS = ["日", "一", "二", "三", "四", "五", "六"];
+
+    // ===== 首页状态卡片的数据 =====
+    // 状态先写死；时间按本机时区实时计算；天气按用户选的地区实时获取
+    const DEFAULT_NAME = "naiwa";
+    const PROFILE_STATE = "在路上";
+
+    const homeView = document.getElementById("home-view");
+    const todoView = document.getElementById("todo-view");
+    const meLineEl = document.getElementById("me-line");
+    const doingLineEl = document.getElementById("doing-line");
+    const nameInput = document.getElementById("name-input");
+    document.getElementById("profile-state").textContent = `· ${PROFILE_STATE}`;
+
+    // ===== 名字：用户输入，存在 localStorage 里，刷新后还在 =====
+    function loadName() {
+      try { return localStorage.getItem("profileName") || DEFAULT_NAME; } catch (e) { return DEFAULT_NAME; }
+    }
+    let savedName = loadName();
+
+    function showName(name) {
+      nameInput.value = name;
+      nameInput.size = Math.max(name.length, 2);   // 不支持 field-sizing 的浏览器靠这个调宽度
+    }
+
+    function saveName() {
+      const name = nameInput.value.trim() || DEFAULT_NAME;   // 清空了就恢复默认名字
+      savedName = name;
+      showName(name);
+      try { localStorage.setItem("profileName", name); } catch (e) {}
+    }
+
+    nameInput.addEventListener("input", () => { nameInput.size = Math.max(nameInput.value.length, 2); });
+    nameInput.addEventListener("change", saveName);   // 失去焦点或按回车时触发
+    nameInput.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") nameInput.blur();
+      if (event.key === "Escape") {
+        showName(savedName);   // 放弃这次修改
+        nameInput.blur();
+      }
+    });
+    showName(savedName);
+
+    // ===== 地区：用户选 国家 + 省/州，用省会（首府）的经纬度查天气 =====
+    // [名字, 纬度, 经度]
+    const REGIONS = {
+      "中国": [
+        ["北京", 39.90, 116.41], ["天津", 39.13, 117.20], ["上海", 31.23, 121.47], ["重庆", 29.56, 106.55],
+        ["河北", 38.04, 114.51], ["山西", 37.87, 112.55], ["辽宁", 41.80, 123.43], ["吉林", 43.82, 125.32],
+        ["黑龙江", 45.80, 126.53], ["江苏", 32.06, 118.80], ["浙江", 30.27, 120.16], ["安徽", 31.82, 117.23],
+        ["福建", 26.07, 119.30], ["江西", 28.68, 115.86], ["山东", 36.65, 117.12], ["河南", 34.75, 113.62],
+        ["湖北", 30.59, 114.31], ["湖南", 28.23, 112.94], ["广东", 23.13, 113.26], ["海南", 20.04, 110.20],
+        ["四川", 30.57, 104.07], ["贵州", 26.65, 106.63], ["云南", 25.04, 102.71], ["陕西", 34.34, 108.94],
+        ["甘肃", 36.06, 103.83], ["青海", 36.62, 101.78], ["内蒙古", 40.84, 111.75], ["广西", 22.82, 108.37],
+        ["西藏", 29.65, 91.13], ["宁夏", 38.49, 106.23], ["新疆", 43.83, 87.62], ["香港", 22.32, 114.17],
+        ["澳门", 22.20, 113.54], ["台湾", 25.03, 121.57],
+      ],
+      "日本": [
+        ["东京都", 35.68, 139.69], ["大阪府", 34.69, 135.50], ["京都府", 35.01, 135.77], ["北海道", 43.06, 141.35],
+        ["神奈川县", 35.45, 139.64], ["爱知县", 35.18, 136.91], ["福冈县", 33.59, 130.40], ["冲绳县", 26.21, 127.68],
+      ],
+      "韩国": [["首尔", 37.57, 126.98], ["釜山", 35.18, 129.08], ["济州道", 33.50, 126.53]],
+      "新加坡": [["新加坡", 1.35, 103.82]],
+      "美国": [
+        ["加利福尼亚州", 38.58, -121.49], ["纽约州", 40.71, -74.01], ["得克萨斯州", 30.27, -97.74],
+        ["华盛顿州", 47.61, -122.33], ["佛罗里达州", 25.76, -80.19], ["伊利诺伊州", 41.88, -87.63],
+        ["马萨诸塞州", 42.36, -71.06],
+      ],
+      "英国": [["英格兰", 51.51, -0.13], ["苏格兰", 55.95, -3.19], ["威尔士", 51.48, -3.18], ["北爱尔兰", 54.60, -5.93]],
+      "加拿大": [["安大略省", 43.65, -79.38], ["不列颠哥伦比亚省", 49.28, -123.12], ["魁北克省", 45.50, -73.57], ["阿尔伯塔省", 51.05, -114.07]],
+      "澳大利亚": [["新南威尔士州", -33.87, 151.21], ["维多利亚州", -37.81, 144.96], ["昆士兰州", -27.47, 153.03], ["西澳大利亚州", -31.95, 115.86]],
+    };
+    const DEFAULT_REGION = { country: "中国", province: "广东" };
+
+    function loadRegion() {
+      try {
+        const r = JSON.parse(localStorage.getItem("weatherRegion"));
+        // 存的数据要在列表里能找到才用，防止旧数据或手动改坏
+        if (r && REGIONS[r.country] && REGIONS[r.country].some(p => p[0] === r.province)) return r;
+      } catch (e) {}
+      return DEFAULT_REGION;
+    }
+    let region = loadRegion();
+
+    function regionCoords(r) {
+      const [, lat, lon] = REGIONS[r.country].find(p => p[0] === r.province);
+      return { lat, lon };
+    }
+
+    // ===== 实时天气 =====
+    // 主接口 Open-Meteo（免费、免 Key、允许跨域），失败时退到 wttr.in；两者都按经纬度查
+    // Open-Meteo 只返回 WMO 天气代码，这里转成中文
+    const WEATHER_CODES = {
+      0: "晴", 1: "晴间多云", 2: "多云", 3: "阴",
+      45: "雾", 48: "雾凇",
+      51: "毛毛雨", 53: "毛毛雨", 55: "毛毛雨", 56: "冻毛毛雨", 57: "冻毛毛雨",
+      61: "小雨", 63: "中雨", 65: "大雨", 66: "冻雨", 67: "冻雨",
+      71: "小雪", 73: "中雪", 75: "大雪", 77: "雪粒",
+      80: "阵雨", 81: "阵雨", 82: "强阵雨", 85: "阵雪", 86: "强阵雪",
+      95: "雷阵雨", 96: "雷阵雨伴冰雹", 99: "雷阵雨伴冰雹",
+    };
+    const WEATHER_CACHE_MS = 30 * 60 * 1000;   // 30 分钟内不重复请求，避免被接口限流
+    const weatherEl = document.getElementById("weather-text");
+    let weatherRequestId = 0;   // 快速切换地区时，只采用最后一次请求的结果
+
+    // 带超时的 fetch，超时或 HTTP 出错都抛异常
+    async function getJSON(url, timeoutMs) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, { signal: controller.signal });
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return await res.json();
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    async function fetchWeather({ lat, lon }) {
+      try {
+        const d = await getJSON(
+          `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,weather_code`, 8000);
+        return { desc: WEATHER_CODES[d.current.weather_code] ?? "未知", temp: Math.round(d.current.temperature_2m) };
+      } catch (e) {
+        const d = await getJSON(`https://wttr.in/${lat},${lon}?format=j1&lang=zh`, 8000);
+        const c = d.current_condition[0];
+        return { desc: c.lang_zh?.[0]?.value || c.weatherDesc[0].value, temp: Number(c.temp_C) };
+      }
+    }
+
+    function renderWeather(w) {
+      weatherEl.textContent = w
+        ? `${region.province} · ${w.desc} ${w.temp}°C`
+        : `${region.province} · 天气暂不可用`;
+    }
+
+    function readWeatherCache() {
+      try {
+        const c = JSON.parse(localStorage.getItem("weatherCache"));
+        if (c && c.country === region.country && c.province === region.province) return c;
+      } catch (e) {}
+      return null;
+    }
+
+    async function updateWeather(force = false) {
+      const cache = readWeatherCache();
+      if (cache) renderWeather(cache.weather);   // 先显示缓存，不让用户干等
+      if (!force && cache && Date.now() - cache.time < WEATHER_CACHE_MS) return;
+      if (!cache) weatherEl.textContent = `${region.province} · 天气加载中…`;
+
+      const id = ++weatherRequestId;
+      try {
+        const weather = await fetchWeather(regionCoords(region));
+        if (id !== weatherRequestId) return;   // 已经切换到别的地区了
+        renderWeather(weather);
+        try {
+          localStorage.setItem("weatherCache",
+            JSON.stringify({ ...region, time: Date.now(), weather }));
+        } catch (e) {}
+      } catch (e) {
+        if (id === weatherRequestId && !cache) renderWeather(null);
+      }
+    }
+
+    // ===== 地区选择面板：点天气文字展开，选国家 → 省/州 =====
+    const weatherBtn = document.getElementById("weather-btn");
+    const regionPanel = document.getElementById("region-panel");
+    const countrySelect = document.getElementById("country-select");
+    const provinceSelect = document.getElementById("province-select");
+
+    // 选项文字用 new Option(文字, 值)，不拼 HTML
+    Object.keys(REGIONS).forEach(c => countrySelect.add(new Option(c, c)));
+
+    function fillProvinces(country, selected) {
+      provinceSelect.innerHTML = "";
+      REGIONS[country].forEach(([name]) => provinceSelect.add(new Option(name, name)));
+      provinceSelect.value = selected ?? REGIONS[country][0][0];
+    }
+
+    function openRegionPanel(open) {
+      regionPanel.hidden = !open;
+      weatherBtn.setAttribute("aria-expanded", String(open));
+      if (open) {
+        countrySelect.value = region.country;
+        fillProvinces(region.country, region.province);
+        countrySelect.focus();
+      }
+    }
+
+    function applyRegion() {
+      region = { country: countrySelect.value, province: provinceSelect.value };
+      try { localStorage.setItem("weatherRegion", JSON.stringify(region)); } catch (e) {}
+      updateWeather(true);
+    }
+
+    weatherBtn.addEventListener("click", () => openRegionPanel(regionPanel.hidden));
+    countrySelect.addEventListener("change", () => {
+      fillProvinces(countrySelect.value);   // 换国家时省份默认选第一个
+      applyRegion();
+    });
+    provinceSelect.addEventListener("change", applyRegion);
+    document.getElementById("region-done").addEventListener("click", () => {
+      openRegionPanel(false);
+      weatherBtn.focus();
+    });
+    regionPanel.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        openRegionPanel(false);
+        weatherBtn.focus();
+      }
+    });
+
+    // 补零：7 -> "07"
+    function pad(n) {
+      return String(n).padStart(2, "0");
+    }
+
+    // 格式化为 "09-28 14:05"
+    function formatTime(date) {
+      return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+    }
+
+    // 取某个时区下的 月/日/星期/时:分，格式化成 "9/29 周二 · 10:08"
+    function formatZoned(date, timeZone) {
+      const parts = {};
+      new Intl.DateTimeFormat("en-US", {
+        timeZone,
+        month: "numeric", day: "numeric", weekday: "short",
+        hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+      }).formatToParts(date).forEach(p => { parts[p.type] = p.value; });
+      const weekdayIndex = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(parts.weekday);
+      return `${parts.month}/${parts.day} 周${WEEKDAYS[weekdayIndex]} · ${parts.hour}:${parts.minute}`;
+    }
+
+    function updateStatusCard(now) {
+      meLineEl.textContent = `你 ${formatZoned(now)} · `;
+    }
+
+    // 时钟
+    function updateClock() {
+      const now = new Date();
+      clockTimeEl.textContent = `${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+      clockTimeEl.dateTime = now.toISOString();
+      clockDateEl.textContent = `${now.getFullYear()}年${now.getMonth() + 1}月${now.getDate()}日 星期${WEEKDAYS[now.getDay()]}`;
+      updateStatusCard(now);
+    }
+
+    // ===== 日间 / 夜间切换 =====
+    const themeToggle = document.getElementById("theme-toggle");
+    function setTheme(theme) {
+      document.documentElement.dataset.theme = theme;
+      themeToggle.setAttribute("aria-label", theme === "night" ? "切换到日间模式" : "切换到夜间模式");
+    }
+    themeToggle.addEventListener("click", () => {
+      const next = document.documentElement.dataset.theme === "night" ? "day" : "night";
+      setTheme(next);
+      try { localStorage.setItem("theme", next); } catch (e) {}   // 记住手动选择
+    });
+    setTheme(document.documentElement.dataset.theme);
+
+    // ===== 近期安排 =====
+    function loadProjects() {
+      try {
+        const list = JSON.parse(localStorage.getItem("projects"));
+        if (Array.isArray(list)) return list;
+      } catch (e) {}
+      return [];
+    }
+    function saveProjects() {
+      try { localStorage.setItem("projects", JSON.stringify(projectList)); } catch (e) {}
+    }
+    let projectList = loadProjects();
+    let nextProjId = projectList.reduce((max, p) => Math.max(max, p.id || 0), 0) + 1;
+
+    function newProject(name) {
+      const p = {
+        id: nextProjId++, name: name.trim() || "新安排",
+        freeText: "",
+        hidden: false, status: "active", createdAt: Date.now(),
+      };
+      projectList.unshift(p);
+      saveProjects();
+      return p;
+    }
+
+    function projProgress(p) { return ""; }
+
+    function hideProject(id) {
+      const p = projectList.find(p => p.id === id);
+      if (p) { p.hidden = true; saveProjects(); }
+    }
+    function showProject(id) {
+      const p = projectList.find(p => p.id === id);
+      if (p) { p.hidden = false; saveProjects(); }
+    }
+
+    // ===== 首页近期安排卡片 =====
+    const projectsHintList = document.getElementById("projects-hint-list");
+    const openHintIds = new Set();   // 首页展开的条目
+
+    function renderProjectsHint() {
+      projectsHintList.innerHTML = "";
+      const visible = projectList.filter(p => !p.hidden && p.status !== "done");
+      if (visible.length === 0) {
+        const li = document.createElement("li");
+        li.className = "empty";
+        li.textContent = "还没有近期安排";
+        projectsHintList.appendChild(li);
+        return;
+      }
+      visible.forEach(p => {
+        const wrapper = document.createElement("li");
+        wrapper.className = "proj-hint-wrapper";
+
+        // 主行
+        const row = document.createElement("div");
+        row.className = "project-row";
+        row.style.cursor = "pointer";
+
+        const dot = document.createElement("span");
+        dot.className = "project-dot";
+
+        const nameSpan = document.createElement("span");
+        nameSpan.className = "project-name-link";
+        nameSpan.style.cursor = "pointer";
+        nameSpan.textContent = p.name;
+
+        const chevron = document.createElement("span");
+        chevron.style.cssText = "flex-shrink:0; color:var(--faint); font-size:14px; transition:transform 0.2s;";
+        chevron.setAttribute("aria-hidden", "true");
+        chevron.textContent = "›";
+
+        const hideBtn = document.createElement("button");
+        hideBtn.type = "button";
+        hideBtn.className = "project-hide-btn";
+        hideBtn.textContent = "隐藏";
+        hideBtn.setAttribute("aria-label", `隐藏 ${p.name}`);
+        hideBtn.addEventListener("click", (e) => {
+          e.stopPropagation();
+          hideProject(p.id);
+          renderProjectsHint();
+        });
+
+        row.append(dot, nameSpan, chevron, hideBtn);
+
+        // 内联预览区（只读）
+        const preview = document.createElement("div");
+        preview.className = "proj-inline-preview";
+        preview.hidden = !openHintIds.has(p.id);
+        preview.textContent = p.freeText || "（还没有内容）";
+
+        // 编辑区
+        const editArea = document.createElement("textarea");
+        editArea.className = "proj-inline-textarea";
+        editArea.value = p.freeText;
+        editArea.placeholder = "随便写点什么…";
+        editArea.hidden = true;
+
+        const editRow = document.createElement("div");
+        editRow.className = "proj-inline-edit-row";
+        editRow.hidden = true;
+
+        const saveBtn = document.createElement("button");
+        saveBtn.type = "button";
+        saveBtn.className = "proj-inline-save";
+        saveBtn.textContent = "保存";
+
+        const cancelBtn = document.createElement("button");
+        cancelBtn.type = "button";
+        cancelBtn.className = "proj-inline-cancel";
+        cancelBtn.textContent = "取消";
+
+        const editBtn = document.createElement("button");
+        editBtn.type = "button";
+        editBtn.className = "proj-inline-cancel";
+        editBtn.textContent = "编辑";
+
+        editRow.append(saveBtn, cancelBtn, editBtn);
+
+        function enterEdit() {
+          editArea.value = p.freeText;
+          preview.hidden = true;
+          editArea.hidden = false;
+          saveBtn.hidden = false;
+          cancelBtn.hidden = false;
+          editBtn.hidden = true;
+          editArea.focus();
+        }
+        function exitEdit(save) {
+          if (save) {
+            p.freeText = editArea.value;
+            saveProjects();
+            preview.textContent = p.freeText || "（还没有内容）";
+          }
+          preview.hidden = false;
+          editArea.hidden = true;
+          saveBtn.hidden = true;
+          cancelBtn.hidden = true;
+          editBtn.hidden = false;
+        }
+
+        saveBtn.addEventListener("click", () => exitEdit(true));
+        cancelBtn.addEventListener("click", () => exitEdit(false));
+        editBtn.addEventListener("click", enterEdit);
+
+        // 初始化按钮状态
+        saveBtn.hidden = true;
+        cancelBtn.hidden = true;
+
+        editRow.hidden = !openHintIds.has(p.id);
+
+        // 点主行展开/收起
+        row.addEventListener("click", (e) => {
+          if (e.target === hideBtn) return;
+          const isOpen = openHintIds.has(p.id);
+          if (isOpen) {
+            openHintIds.delete(p.id);
+            preview.hidden = true;
+            editArea.hidden = true;
+            editRow.hidden = true;
+            chevron.style.transform = "";
+          } else {
+            openHintIds.add(p.id);
+            preview.hidden = false;
+            editRow.hidden = false;
+            chevron.style.transform = "rotate(90deg)";
+          }
+        });
+
+        if (openHintIds.has(p.id)) chevron.style.transform = "rotate(90deg)";
+
+        wrapper.append(row, preview, editArea, editRow);
+        projectsHintList.appendChild(wrapper);
+      });
+    }
+
+    // ===== 近期安排页 =====
+    const projectsView = document.getElementById("projects-view");
+    const projListEl = document.getElementById("proj-list");
+    const hiddenSection = document.getElementById("hidden-section");
+    const hiddenListEl = document.getElementById("hidden-list");
+    const openProjIds = new Set();   // 记住哪些项目是展开的
+
+    document.getElementById("proj-new-btn").addEventListener("click", () => {
+      const p = newProject("新安排");
+      openProjIds.add(p.id);
+      listProjects();
+      // 聚焦到新建项目的名字输入框
+      const nameEl = document.getElementById(`proj-name-${p.id}`);
+      if (nameEl) { nameEl.focus(); nameEl.select(); }
+    });
+
+    function renderProjectDetail(p) {
+      const detail = document.createElement("div");
+      detail.className = "proj-detail";
+      detail.id = `proj-detail-${p.id}`;
+      if (!openProjIds.has(p.id)) detail.hidden = true;
+
+      // 名字输入框
+      const nameInput2 = document.createElement("input");
+      nameInput2.type = "text";
+      nameInput2.className = "proj-name-input";
+      nameInput2.id = `proj-name-${p.id}`;
+      nameInput2.value = p.name;
+      nameInput2.maxLength = 40;
+      nameInput2.addEventListener("change", () => {
+        p.name = nameInput2.value.trim() || "新安排";
+        saveProjects();
+        listProjects();
+        renderProjectsHint();
+        openProjIds.add(p.id);
+      });
+      detail.appendChild(nameInput2);
+
+      // 自由文本区
+      const ta = document.createElement("textarea");
+      ta.className = "proj-note";
+      ta.placeholder = "随便写点什么…";
+      ta.value = p.freeText;
+      ta.style.marginTop = "10px";
+      ta.removeAttribute("hidden");
+      ta.addEventListener("input", () => { p.freeText = ta.value; saveProjects(); });
+      detail.appendChild(ta);
+
+      // 底部操作
+      const actions = document.createElement("div");
+      actions.className = "proj-actions";
+
+      const doneBtn = document.createElement("button");
+      doneBtn.type = "button";
+      doneBtn.className = "proj-mark-done-btn";
+      doneBtn.textContent = p.status === "done" ? "↩ 重新进行" : "✓ 标记完成";
+      doneBtn.addEventListener("click", () => {
+        p.status = p.status === "done" ? "active" : "done";
+        saveProjects();
+        listProjects();
+        renderProjectsHint();
+        openProjIds.add(p.id);
+      });
+
+      const hideBtn2 = document.createElement("button");
+      hideBtn2.type = "button";
+      hideBtn2.className = "proj-hide-btn2";
+      hideBtn2.textContent = p.hidden ? "已隐藏（首页不显示）" : "在首页隐藏";
+      hideBtn2.addEventListener("click", () => {
+        p.hidden ? showProject(p.id) : hideProject(p.id);
+        listProjects();
+        renderProjectsHint();
+        openProjIds.add(p.id);
+      });
+
+      const delBtn = document.createElement("button");
+      delBtn.type = "button";
+      delBtn.className = "proj-del-btn";
+      delBtn.textContent = "删除安排";
+      delBtn.addEventListener("click", () => {
+        if (!confirm(`确定删除「${p.name}」吗？`)) return;
+        const idx = projectList.findIndex(x => x.id === p.id);
+        if (idx !== -1) projectList.splice(idx, 1);
+        openProjIds.delete(p.id);
+        saveProjects();
+        listProjects();
+        renderProjectsHint();
+      });
+
+      actions.append(doneBtn, hideBtn2, delBtn);
+      detail.appendChild(actions);
+      return detail;
+    }
+
+    function listProjects() {
+      projListEl.innerHTML = "";
+      hiddenListEl.innerHTML = "";
+
+      const visible = projectList.filter(p => !p.hidden);
+      const hidden = projectList.filter(p => p.hidden);
+
+      visible.forEach(p => {
+        const wrap = document.createElement("div");
+        wrap.className = "proj-item" + (openProjIds.has(p.id) ? " is-open" : "");
+
+        const summary = document.createElement("button");
+        summary.type = "button";
+        summary.className = "proj-summary";
+        summary.setAttribute("aria-expanded", String(openProjIds.has(p.id)));
+        summary.setAttribute("aria-controls", `proj-detail-${p.id}`);
+
+        const chev = document.createElement("span");
+        chev.className = "proj-chevron";
+        chev.setAttribute("aria-hidden", "true");
+        chev.textContent = "›";
+
+        const titleText = document.createElement("span");
+        titleText.className = "proj-title-text";
+        titleText.textContent = p.name;
+
+        const prog = projProgress(p);
+        if (prog) {
+          const chip = document.createElement("span");
+          chip.className = "proj-chip";
+          chip.textContent = prog;
+          summary.append(chev, titleText, chip);
+        } else {
+          summary.append(chev, titleText);
+        }
+
+        const statusChip = document.createElement("span");
+        statusChip.className = "proj-chip" + (p.status === "done" ? " is-done" : "");
+        statusChip.textContent = p.status === "done" ? "已完成" : "进行中";
+        summary.appendChild(statusChip);
+
+        const detail = renderProjectDetail(p);
+
+        summary.addEventListener("click", () => {
+          const isOpen = openProjIds.has(p.id);
+          if (isOpen) openProjIds.delete(p.id); else openProjIds.add(p.id);
+          wrap.classList.toggle("is-open", !isOpen);
+          summary.setAttribute("aria-expanded", String(!isOpen));
+          detail.hidden = isOpen;
+        });
+
+        wrap.append(summary, detail);
+        projListEl.appendChild(wrap);
+      });
+
+      hiddenSection.hidden = hidden.length === 0;
+      hidden.forEach(p => {
+        const li = document.createElement("li");
+        li.className = "project-row";
+
+        const dot = document.createElement("span");
+        dot.className = "project-dot";
+
+        const name = document.createElement("span");
+        name.className = "project-name-link";
+        name.style.cursor = "default";
+        name.textContent = p.name;
+
+        const restoreBtn = document.createElement("button");
+        restoreBtn.type = "button";
+        restoreBtn.className = "restore-btn";
+        restoreBtn.textContent = "恢复显示";
+        restoreBtn.addEventListener("click", () => {
+          showProject(p.id);
+          listProjects();
+          renderProjectsHint();
+        });
+
+        li.append(dot, name, restoreBtn);
+        hiddenListEl.appendChild(li);
+      });
+
+      // 处理从首页带过来的 focus 参数
+      const focusId = Number(new URLSearchParams(location.hash.split("?")[1] || "").get("focus"));
+      if (focusId) {
+        openProjIds.add(focusId);
+        const el = document.querySelector(`[aria-controls="proj-detail-${focusId}"]`);
+        if (el) {
+          const detail = document.getElementById(`proj-detail-${focusId}`);
+          if (detail) detail.hidden = false;
+          el.closest(".proj-item")?.classList.add("is-open");
+          el.setAttribute("aria-expanded", "true");
+          setTimeout(() => el.scrollIntoView({ behavior: "smooth", block: "start" }), 100);
+        }
+      }
+    }
+
+    // ===== 页面切换 =====
+    // 首页 --点日历图标--> #calendar 日历页 --点添加日程--> #todo 待办页
+    // 用 hash 的好处：浏览器的返回键也能一层层退回去，刷新后停在当前页
+    const calendarView = document.getElementById("calendar-view");
+    function route() {
+      const hash = location.hash.split("?")[0];
+      const page = ["#calendar", "#todo", "#projects"].includes(hash) ? hash.slice(1) : "home";
+      homeView.hidden = page !== "home";
+      calendarView.hidden = page !== "calendar";
+      todoView.hidden = page !== "todo";
+      projectsView.hidden = page !== "projects";
+      if (page === "calendar") {
+        renderCalendar();
+        loadActivity();
+      }
+      if (page === "todo") {
+        listTasks();
+        input.focus();
+      }
+      if (page === "projects") listProjects();
+      if (page === "home") renderProjectsHint();
+    }
+    window.addEventListener("hashchange", route);
+
+    // ===== 日期小工具 =====
+    // Date -> "2026-09-29"（按本机时区，不用 toISOString，那个是 UTC 会差一天）
+    function dateKey(d) {
+      return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    }
+    // "2026-09-29" -> 当天 00:00 的 Date
+    function parseKey(key) {
+      const [y, m, d] = key.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+    function todayKey() {
+      return dateKey(new Date());
+    }
+
+    // 日历上选中的那天，默认今天；待办页和作息都跟着它走
+    let selectedDate = todayKey();
+    let viewYear = new Date().getFullYear();
+    let viewMonth = new Date().getMonth();   // 0-11
+
+    // ===== 日历 =====
+    const yearTabs = document.getElementById("year-tabs");
+    const monthTitle = document.getElementById("month-title");
+    const calGrid = document.getElementById("cal-grid");
+    const dayTitle = document.getElementById("day-title");
+    const todayChip = document.getElementById("today-chip");
+    const schedList = document.getElementById("sched-list");
+    const routineTitle = document.getElementById("routine-title");
+    const todoTitle = document.getElementById("todo-title");
+
+    // 某天的中文标题："9月29日 · 周二"
+    function dayLabel(key) {
+      const d = parseKey(key);
+      return `${d.getMonth() + 1}月${d.getDate()}日 · 周${WEEKDAYS[d.getDay()]}`;
+    }
+
+    function renderYearTabs() {
+      const thisYear = new Date().getFullYear();
+      yearTabs.innerHTML = "";
+      [thisYear, thisYear + 1].forEach(y => {
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "seg-btn";
+        btn.textContent = `${y} 年`;
+        btn.setAttribute("aria-pressed", String(y === viewYear));
+        btn.addEventListener("click", () => {
+          viewYear = y;
+          renderCalendar();
+        });
+        yearTabs.appendChild(btn);
+      });
+    }
+
+    function renderMonth() {
+      monthTitle.textContent = `${viewYear} 年 ${viewMonth + 1} 月`;
+      calGrid.innerHTML = "";
+
+      // 哪些天有任务，用来画小圆点
+      const busyDays = new Set(todoList.map(t => t.date));
+      const firstWeekday = new Date(viewYear, viewMonth, 1).getDay();   // 1 号是周几，前面留几个空格
+      const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+      const today = todayKey();
+
+      for (let i = 0; i < firstWeekday; i++) {
+        calGrid.appendChild(document.createElement("span"));
+      }
+      for (let day = 1; day <= daysInMonth; day++) {
+        const key = dateKey(new Date(viewYear, viewMonth, day));
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "cal-day";
+        if (key === today) btn.classList.add("is-today");
+        btn.setAttribute("aria-pressed", String(key === selectedDate));
+
+        const busy = busyDays.has(key);
+        btn.setAttribute("aria-label",
+          `${viewMonth + 1}月${day}日${key === today ? "，今天" : ""}${busy ? "，有日程" : ""}`);
+
+        const num = document.createElement("span");
+        num.className = "cal-num";
+        num.textContent = day;
+        const mark = document.createElement("span");
+        mark.className = "cal-mark";
+        if (busy) {
+          const dot = document.createElement("span");
+          dot.className = "cal-dot";
+          mark.appendChild(dot);
+        }
+        btn.append(num, mark);
+
+        btn.addEventListener("click", () => {
+          selectedDate = key;
+          renderCalendar();
+          loadActivity();
+        });
+        calGrid.appendChild(btn);
+      }
+    }
+
+    // 选中那天的日程卡片
+    function renderSchedule() {
+      const isToday = selectedDate === todayKey();
+      dayTitle.textContent = dayLabel(selectedDate);
+      todayChip.hidden = !isToday;
+      routineTitle.textContent = isToday ? "今日作息" : `${dayLabel(selectedDate)} 作息`;
+
+      schedList.innerHTML = "";
+      const tasks = todoList.filter(t => t.date === selectedDate);
+      if (tasks.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "empty";
+        empty.textContent = "这天还没有日程";
+        schedList.appendChild(empty);
+        return;
+      }
+      const isPast = selectedDate < todayKey();   // "YYYY-MM-DD" 格式的字符串可以直接比大小
+      tasks.forEach(item => {
+        const li = document.createElement("li");
+        if (item.completed) li.classList.add("is-done");
+        else if (isPast) li.classList.add("is-past");
+
+        const body = document.createElement("div");
+        body.className = "sched-body";
+        const title = document.createElement("div");
+        title.className = "sched-title";
+        title.textContent = item.task;
+        const meta = document.createElement("div");
+        meta.className = "sched-meta";
+        meta.textContent = `添加于 ${formatTime(new Date(item.createdAt))}`;
+        body.append(title, meta);
+
+        const chip = document.createElement("span");
+        chip.className = "chip";
+        chip.textContent = item.completed ? "已完成" : isPast ? "已过" : "未完成";
+
+        li.append(body, chip);
+        schedList.appendChild(li);
+      });
+    }
+
+    function renderCalendar() {
+      renderYearTabs();
+      renderMonth();
+      renderSchedule();
+    }
+
+    function shiftMonth(delta) {
+      const d = new Date(viewYear, viewMonth + delta, 1);   // Date 会自动处理跨年
+      viewYear = d.getFullYear();
+      viewMonth = d.getMonth();
+      renderCalendar();
+    }
+    document.getElementById("prev-month").addEventListener("click", () => shiftMonth(-1));
+    document.getElementById("next-month").addEventListener("click", () => shiftMonth(1));
+
+    function showMessage(text) {
+      messageEl.textContent = text;
+    }
+
+    // 列出（只列日历上选中那天的任务）
+    function listTasks() {
+      const isToday = selectedDate === todayKey();
+      todoTitle.textContent = isToday ? "今日待办事件" : `${dayLabel(selectedDate)} 待办`;
+      listEl.innerHTML = "";
+
+      const tasks = todoList.filter(t => t.date === selectedDate);
+      if (tasks.length === 0) {
+        const empty = document.createElement("li");
+        empty.className = "empty";
+        empty.textContent = "当前没有任务哦";
+        listEl.appendChild(empty);
+        return;
+      }
+
+      tasks.forEach((item, i) => {
+        const li = document.createElement("li");
+        if (item.completed) li.classList.add("completed");
+
+        // 标记已完成：勾选框
+        const label = document.createElement("label");
+        const checkbox = document.createElement("input");
+        checkbox.type = "checkbox";
+        checkbox.checked = item.completed;
+        checkbox.addEventListener("change", () => mark(item.id));
+
+        const body = document.createElement("span");
+        body.className = "task-body";
+
+        const text = document.createElement("span");
+        text.className = "task-text";
+        text.textContent = `${i + 1}. ${item.task}`;   // 用 textContent，防止输入的内容被当成 HTML 执行
+
+        // 时间记录：添加时间，完成后再显示完成时间
+        const time = document.createElement("span");
+        time.className = "task-time";
+        time.textContent = item.completed
+          ? `添加于 ${formatTime(new Date(item.createdAt))} · 完成于 ${formatTime(new Date(item.completedAt))}`
+          : `添加于 ${formatTime(new Date(item.createdAt))}`;
+
+        body.append(text, time);
+
+        const status = document.createElement("span");
+        status.className = "status";
+        status.textContent = item.completed ? "[已完成]" : "[未完成]";
+
+        label.append(checkbox, body, status);
+
+        // 删除按钮
+        const deleteBtn = document.createElement("button");
+        deleteBtn.type = "button";
+        deleteBtn.className = "small-btn delete-btn";
+        deleteBtn.textContent = "删除";
+        deleteBtn.setAttribute("aria-label", `删除任务 ${item.task}`);
+        deleteBtn.addEventListener("click", () => remove(item.id));
+
+        li.append(label, deleteBtn);
+        listEl.appendChild(li);
+      });
+    }
+
+    // 增加
+    function add(taskName) {
+      taskName = taskName.trim();   // 相当于 Python 的 .strip()
+      if (!taskName) {
+        showMessage("未输入事件");
+        return;
+      }
+      todoList.push({
+        id: nextId++, date: selectedDate, task: taskName,
+        completed: false, createdAt: Date.now(), completedAt: null,
+      });
+      saveTodos();
+      showMessage(`已添加 事件 ${taskName}`);
+      listTasks();
+    }
+
+    // 标记已完成（再点一次可以取消）
+    // 用 id 找任务：列表只显示某一天的任务，显示的序号和数组下标对不上
+    function mark(id) {
+      const item = todoList.find(t => t.id === id);
+      item.completed = !item.completed;
+      item.completedAt = item.completed ? Date.now() : null;
+      saveTodos();
+      showMessage(item.completed
+        ? `已将任务${item.task}标记为已完成啦`
+        : `已将任务${item.task}改回未完成`);
+      listTasks();
+    }
+
+    // 删除
+    function remove(id) {
+      const index = todoList.findIndex(t => t.id === id);
+      const [removed] = todoList.splice(index, 1);   // 相当于 Python 的 pop(index)
+      saveTodos();
+      showMessage(`已将任务${removed.task}删除了`);
+      listTasks();
+    }
+
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();   // 阻止表单提交刷新页面
+      add(input.value);
+      input.value = "";
+      input.focus();
+    });
+
+    // ===== 电脑活动记录 =====
+    // 浏览器本身读不到“电脑上开着哪个软件”，所以由 activity_tracker.py 在本机后台记录，
+    // 网页通过它提供的接口 /api/activity 拿数据。页面也要由它打开（http://127.0.0.1:8765），
+    // 直接双击打开 html 文件时拿不到数据，会显示使用说明。
+    const activityListEl = document.getElementById("activity-list");
+    const activityStateEl = document.getElementById("activity-state");
+    const trackerAvailable = location.protocol.startsWith("http");
+
+    // 秒数 -> "1小时5分" / "12分" / "40秒"
+    function formatDuration(seconds) {
+      const h = Math.floor(seconds / 3600);
+      const m = Math.floor((seconds % 3600) / 60);
+      if (h) return `${h}小时${m}分`;
+      if (m) return `${m}分`;
+      return `${Math.max(1, Math.round(seconds))}秒`;
+    }
+
+    function hm(timestamp) {
+      const d = new Date(timestamp * 1000);
+      return `${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    }
+
+    function showActivityHelp() {
+      activityStateEl.textContent = "还没有连接到记录程序";
+      activityListEl.innerHTML = "";
+      const li = document.createElement("li");
+      li.className = "empty activity-help";
+      li.innerHTML = "在终端运行 <code>python3 stage2/activity_tracker.py</code>，" +
+        "然后用浏览器打开 <code>http://127.0.0.1:8765</code>";   // 固定文字，没有用户输入，可以用 innerHTML
+      activityListEl.appendChild(li);
+      doingLineEl.hidden = true;
+    }
+
+    // 两次看电脑之间间隔不到 5 分钟，算同一段（和 tracker 判断“离开”的时间一致）
+    const REST_MIN_SECONDS = 5 * 60;
+
+    // 把一条条软件记录合并成“看电脑”时间段，中间的空档就是“休息”
+    // 返回 [{ type: "pc" | "rest", start, end, apps: [用得最久的软件...] }]，时间单位是秒
+    function buildRoutine(records, dayStart, dayEnd) {
+      const sessions = [];
+      [...records].sort((a, b) => a.start - b.start).forEach(r => {
+        const last = sessions[sessions.length - 1];
+        if (last && r.start - last.end < REST_MIN_SECONDS) {
+          last.end = Math.max(last.end, r.end);
+        } else {
+          sessions.push({ start: r.start, end: r.end, usage: {}, records: [] });
+        }
+        const s = sessions[sessions.length - 1];
+        s.usage[r.app] = (s.usage[r.app] || 0) + (r.end - r.start);
+        s.records.push(r);   // 留着原始记录，点开“看电脑”时显示明细
+      });
+
+      const timeline = [];
+      let cursor = dayStart;
+      sessions.forEach(s => {
+        const start = Math.max(s.start, dayStart);
+        const end = Math.min(s.end, dayEnd);
+        if (end <= start) return;
+        if (start > cursor) timeline.push({ type: "rest", start: cursor, end: start });
+        const apps = Object.entries(s.usage).sort((a, b) => b[1] - a[1]).map(([app]) => app);
+        // 明细也裁到这一天之内（跨零点的记录只算当天那部分）
+        const details = s.records
+          .map(r => ({ app: r.app, start: Math.max(r.start, dayStart), end: Math.min(r.end, dayEnd) }))
+          .filter(r => r.end > r.start);
+        timeline.push({ type: "pc", start, end, apps, details });
+        cursor = end;
+      });
+      if (dayEnd > cursor) timeline.push({ type: "rest", start: cursor, end: dayEnd });
+
+      // 不到 1 分钟的碎片不显示
+      return timeline.filter(seg => seg.end - seg.start >= 60);
+    }
+
+    // 秒级时间戳 -> "09:30"；一天的结束显示成 "24:00"
+    function clockOf(timestamp, dayStart) {
+      if (timestamp - dayStart >= 86400) return "24:00";
+      return hm(timestamp);
+    }
+
+    function renderActivity(data) {
+      const records = data.records;
+      const isToday = selectedDate === todayKey();
+
+      // 首页卡片的第 3 行：正在用的软件（只看今天）
+      const current = isToday ? records.find(r => r.current) : null;
+      if (current) {
+        doingLineEl.textContent = `正在使用 ${current.app} · 已 ${formatDuration(current.end - current.start)}`;
+        doingLineEl.hidden = false;
+      } else if (isToday) {
+        doingLineEl.hidden = true;
+      }
+
+      activityListEl.innerHTML = "";
+      const dayStart = parseKey(selectedDate).getTime() / 1000;
+      const nowSec = Date.now() / 1000;
+      if (dayStart > nowSec) {
+        activityStateEl.textContent = "这天还没到哦";
+        return;
+      }
+      // 今天只统计到现在，过去的日子统计完整的 24 小时
+      const dayEnd = isToday ? nowSec : dayStart + 86400;
+
+      if (records.length === 0) {
+        activityStateEl.textContent = isToday ? "今天还没有看电脑的记录" : "这天没有记录";
+        const empty = document.createElement("li");
+        empty.className = "empty";
+        empty.textContent = isToday ? "开着 activity_tracker.py 就会自动记录" : "这天没有打开记录程序";
+        activityListEl.appendChild(empty);
+        return;
+      }
+
+      const timeline = buildRoutine(records, dayStart, dayEnd);
+      const pcTotal = timeline.filter(s => s.type === "pc").reduce((sum, s) => sum + (s.end - s.start), 0);
+      activityStateEl.textContent =
+        `${isToday && data.idle ? "暂时离开了电脑 · " : ""}看电脑共 ${formatDuration(pcTotal)}`;
+
+      timeline.forEach((seg, i) => {
+        const li = document.createElement("li");
+        li.className = seg.type === "pc" ? "is-pc" : "is-rest";
+
+        const time = document.createElement("span");
+        time.className = "routine-time";
+        const endText = isToday && i === timeline.length - 1 ? "现在" : clockOf(seg.end, dayStart);
+        time.textContent = `${clockOf(seg.start, dayStart)} - ${endText}`;
+
+        const label = document.createElement("span");
+        label.className = "routine-label";
+        label.textContent = seg.type === "pc" ? "看电脑" : "休息";
+
+        const dur = document.createElement("span");
+        dur.className = "activity-dur";
+        dur.textContent = formatDuration(seg.end - seg.start);
+
+        if (seg.type === "rest") {
+          li.append(time, label, dur);
+          activityListEl.appendChild(li);
+          return;
+        }
+
+        // “看电脑”：整行是一个按钮，点一下展开这段时间里的使用明细
+        const row = document.createElement("button");
+        row.type = "button";
+        row.className = "routine-row";
+
+        const chevron = document.createElement("span");
+        chevron.className = "routine-chevron";
+        chevron.setAttribute("aria-hidden", "true");
+        chevron.textContent = "›";
+
+        // 这段时间里用得最多的前 3 个软件（软件名来自系统，同样用 textContent）
+        const apps = document.createElement("span");
+        apps.className = "routine-app";
+        apps.textContent = seg.apps.slice(0, 3).join("、");
+
+        row.append(chevron, time, label, apps, dur);
+
+        const detail = buildRoutineDetail(seg, dayStart, isToday);
+        detail.id = `routine-detail-${i}`;
+        row.setAttribute("aria-controls", detail.id);
+
+        // 每 15 秒自动刷新一次列表，用这段的开始时间记住哪些是展开的，刷新后保持展开
+        const key = `${selectedDate}@${Math.floor(seg.start)}`;
+        const setOpen = (open) => {
+          row.setAttribute("aria-expanded", String(open));
+          detail.hidden = !open;
+          if (open) openRoutineKeys.add(key); else openRoutineKeys.delete(key);
+        };
+        setOpen(openRoutineKeys.has(key));
+        row.addEventListener("click", () => setOpen(detail.hidden));
+
+        li.append(row, detail);
+        activityListEl.appendChild(li);
+      });
+    }
+
+    const openRoutineKeys = new Set();
+
+    // 一段“看电脑”的明细：按时间顺序列出每个软件用了多久
+    function buildRoutineDetail(seg, dayStart, isToday) {
+      const ul = document.createElement("ul");
+      ul.className = "routine-detail";
+
+      // 同一个软件被打断时 tracker 会记成好几条，这里把紧挨着的同名记录再合并一下
+      const merged = [];
+      seg.details.forEach(r => {
+        const last = merged[merged.length - 1];
+        if (last && last.app === r.app && r.start - last.end < 60) last.end = Math.max(last.end, r.end);
+        else merged.push({ ...r });
+      });
+
+      merged.forEach((r, j) => {
+        const li = document.createElement("li");
+
+        const time = document.createElement("span");
+        time.className = "routine-time";
+        const isLast = isToday && j === merged.length - 1 && seg.end >= Date.now() / 1000 - 60;
+        time.textContent = `${clockOf(r.start, dayStart)} - ${isLast ? "现在" : clockOf(r.end, dayStart)}`;
+
+        const app = document.createElement("span");
+        app.className = "routine-app";
+        app.textContent = r.app;
+
+        const dur = document.createElement("span");
+        dur.className = "activity-dur";
+        dur.textContent = formatDuration(r.end - r.start);
+
+        li.append(time, app, dur);
+        ul.appendChild(li);
+      });
+      return ul;
+    }
+
+    let activityRequestId = 0;   // 快速切换日期时，只采用最后一次请求的结果
+    async function loadActivity() {
+      if (!trackerAvailable) {
+        showActivityHelp();
+        return;
+      }
+      const id = ++activityRequestId;
+      const date = selectedDate;
+      try {
+        const res = await fetch(`/api/activity?date=${date}`, { cache: "no-store" });
+        if (!res.ok) throw new Error(res.status);
+        const data = await res.json();
+        if (id === activityRequestId) renderActivity(data);
+      } catch (e) {
+        if (id !== activityRequestId) return;
+        activityStateEl.textContent = "连接不上记录程序，确认 activity_tracker.py 还在运行";
+        activityListEl.innerHTML = "";
+        doingLineEl.hidden = true;
+      }
+    }
+
+    document.getElementById("activity-refresh").addEventListener("click", loadActivity);
+    document.getElementById("activity-clear").addEventListener("click", async () => {
+      if (!trackerAvailable) return showActivityHelp();
+      if (!confirm("确定清空今天的电脑活动记录吗？")) return;
+      try {
+        await fetch("/api/activity/clear", { method: "POST" });
+      } catch (e) {}
+      loadActivity();
+    });
+
+    updateClock();
+    setInterval(updateClock, 1000);
+    updateWeather();
+    setInterval(updateWeather, WEATHER_CACHE_MS);
+    renderProjectsHint();
+    route();
+    loadActivity();
+    if (trackerAvailable) setInterval(loadActivity, 15000);   // 每 15 秒自动刷新一次活动记录
+  </script>
+</body>
+</html>

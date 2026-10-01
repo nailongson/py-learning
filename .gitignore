@@ -1,3 +1,5 @@
 .venv/
 .env
 runs/detect/predict/
+# 电脑活动记录（隐私数据，不上传）
+stage2/activity_log/
